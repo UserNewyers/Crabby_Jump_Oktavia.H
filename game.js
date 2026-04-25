@@ -1,330 +1,372 @@
+// ─── CANVAS SETUP ────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-
-// Set dimensions
-canvas.width = 800;
+const ctx    = canvas.getContext('2d');
+canvas.width  = 800;
 canvas.height = 450;
 
-// Constants
-const GRAVITY = 0.8;
-const JUMP_STRENGTH = -15;
-const GROUND_Y = 320;
-const OBSTACLE_SPEED = 6;
-const SPAWN_INTERVAL = 1500;
+// ─── CONSTANTS (Time-based, assuming 1 unit = 1 second) ─────────────────────
+const GRAVITY        = 2700;  // px per sec^2
+const JUMP_STRENGTH  = -960;  // px per sec
+const GROUND_Y       = 330;   // Y of the player's feet
+const OBSTACLE_SPEED = 360;   // px per sec
+const SPAWN_MIN      = 1.4;   // seconds
+const SPAWN_RANGE    = 1.2;   // seconds
 
-// Assets
-const assets = {
-    crab: new Image(),
-    rock: new Image(),
-    bg: new Image(),
-    floor: new Image()
-};
+// ─── ASSET LOADING ───────────────────────────────────────────────────────────
+const assets = {};
+let assetsLoaded = 0;
+const ASSET_LIST = { crab: 'assets/crab.png', rock: 'assets/rock.png', bg: 'assets/bg.png', floor: 'assets/floor.png' };
+const TOTAL_ASSETS = Object.keys(ASSET_LIST).length;
 
-assets.crab.src = 'assets/crab.png';
-assets.rock.src = 'assets/rock.png';
-assets.bg.src = 'assets/bg.png';
-assets.floor.src = 'assets/floor.png';
+function loadAssets(onAllLoaded) {
+    for (const [key, src] of Object.entries(ASSET_LIST)) {
+        const img = new Image();
+        img.onload = () => {
+            assetsLoaded++;
+            if (assetsLoaded === TOTAL_ASSETS) onAllLoaded();
+        };
+        img.onerror = () => {
+            console.error(`[Crabby Jump] Failed to load asset: ${src}`);
+            assetsLoaded++;
+            if (assetsLoaded === TOTAL_ASSETS) onAllLoaded();
+        };
+        img.src = src;
+        assets[key] = img;
+    }
+}
 
-// Parallax Layer Class
+// ─── PARALLAX LAYER ──────────────────────────────────────────────────────────
 class ParallaxLayer {
-    constructor(image, speedModifier, yOffset = 0, height = canvas.height) {
-        this.image = image;
-        this.speedModifier = speedModifier;
-        this.width = canvas.width;
-        this.height = height;
-        this.x = 0;
-        this.y = yOffset;
+    constructor(image, speedMultiplier, y, renderHeight) {
+        this.image           = image;
+        this.speedMultiplier = speedMultiplier;
+        this.y               = y;
+        this.renderHeight    = renderHeight;
+        this.tileW           = canvas.width;
+        this.scrollX         = 0;
     }
 
-    update() {
-        this.x -= OBSTACLE_SPEED * this.speedModifier;
-        if (this.x <= -this.width) {
-            this.x = 0;
+    update(dt) {
+        this.scrollX -= OBSTACLE_SPEED * this.speedMultiplier * dt;
+        if (this.scrollX <= -this.tileW) {
+            this.scrollX += this.tileW; 
         }
     }
 
     draw() {
-        ctx.drawImage(this.image, this.x, this.y, this.width, this.height);
-        ctx.drawImage(this.image, this.x + this.width, this.y, this.width, this.height);
+        ctx.drawImage(this.image, this.scrollX, this.y, this.tileW, this.renderHeight);
+        ctx.drawImage(this.image, this.scrollX + this.tileW, this.y, this.tileW, this.renderHeight);
     }
 }
 
-// Particle Class
+// ─── PARTICLE POOL ───────────────────────────────────────────────────────────
 class Particle {
-    constructor(x, y, color) {
-        this.x = x;
-        this.y = y;
-        this.size = Math.random() * 5 + 2;
-        this.speedX = Math.random() * 6 - 3;
-        this.speedY = Math.random() * -5 - 1;
-        this.gravity = 0.2;
-        this.color = color;
-        this.alpha = 1;
-        this.life = 1;
+    constructor() {
+        this.active = false;
     }
-
-    update() {
-        this.speedY += this.gravity;
-        this.x += this.speedX;
-        this.y += this.speedY;
-        this.alpha -= 0.02;
-        this.life = this.alpha;
+    spawn(x, y, color) {
+        this.x       = x;
+        this.y       = y;
+        this.vx      = (Math.random() - 0.5) * 420;
+        this.vy      = (Math.random() * -6 - 1) * 60;
+        this.gravity = 0.25 * 3600; 
+        this.radius  = Math.random() * 4 + 2;
+        this.color   = color;
+        this.alpha   = 1;
+        this.active  = true;
     }
-
+    update(dt) {
+        if (!this.active) return;
+        this.vy += this.gravity * dt;
+        this.x  += this.vx * dt;
+        this.y  += this.vy * dt;
+        this.alpha -= 1.5 * dt;
+        if (this.alpha <= 0) this.active = false;
+    }
     draw() {
+        if (!this.active) return;
         ctx.save();
-        ctx.globalAlpha = this.alpha;
-        ctx.fillStyle = this.color;
+        ctx.globalAlpha = Math.max(0, this.alpha);
+        ctx.fillStyle   = this.color;
         ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
 }
 
-// Game State
-let gameState = 'INTRO';
-let score = 0;
-let animationId;
-let lastSpawnTime = 0;
-let obstacles = [];
-let backgroundLayers = [];
-let particles = [];
-let screenFlash = 0;
+const particlePool = Array.from({ length: 100 }, () => new Particle());
 
-// Initialize Layers
-assets.bg.onload = () => {
-    backgroundLayers.push(new ParallaxLayer(assets.bg, 0.2)); // Far ocean
-};
-assets.floor.onload = () => {
-    backgroundLayers.push(new ParallaxLayer(assets.floor, 0.8, 300, 150)); // Foreground floor
-};
+function spawnParticles(x, y, color, count) {
+    let spawned = 0;
+    for (let i = 0; i < particlePool.length; i++) {
+        if (!particlePool[i].active) {
+            particlePool[i].spawn(x, y, color);
+            spawned++;
+            if (spawned >= count) break;
+        }
+    }
+}
 
-// Player Class
+// ─── OBSTACLE POOL ───────────────────────────────────────────────────────────
+class Obstacle {
+    constructor() {
+        this.w      = 75;
+        this.h      = 75;
+        this.y      = GROUND_Y - this.h;
+        this.active = false;
+    }
+    spawn() {
+        this.x      = canvas.width;
+        this.passed = false;
+        this.active = true;
+    }
+    update(dt) {
+        if (!this.active) return;
+        this.x -= OBSTACLE_SPEED * dt;
+        if (this.x + this.w < 0) this.active = false;
+    }
+    get hitbox() {
+        const margin = 10;
+        return { x: this.x + margin, y: this.y + margin, w: this.w - margin * 2, h: this.h - margin * 2 };
+    }
+    draw() {
+        if (!this.active) return;
+        ctx.drawImage(assets.rock, this.x, this.y, this.w, this.h);
+    }
+}
+
+const obstaclePool = Array.from({ length: 10 }, () => new Obstacle());
+
+// ─── PLAYER ──────────────────────────────────────────────────────────────────
 class Player {
     constructor() {
-        this.width = 100;
-        this.height = 100;
-        this.x = 50;
-        this.y = GROUND_Y;
-        this.dy = 0;
-        this.jumpCount = 0;
-        this.maxJumps = 1;
-        this.hitbox = { x: 0, y: 0, w: 70, h: 70 };
-        this.onGround = true;
+        this.w = 90;
+        this.h = 90;
+        this.x = 60;
+        this.reset();
     }
-
+    reset() {
+        this.y         = GROUND_Y - this.h;
+        this.vy        = 0;
+        this.jumps     = 0;
+        this.maxJumps  = 1;
+        this.onGround  = true;
+    }
     jump() {
-        if (this.jumpCount < this.maxJumps) {
-            this.dy = JUMP_STRENGTH;
-            this.jumpCount++;
+        if (this.jumps < this.maxJumps) {
+            this.vy = JUMP_STRENGTH;
+            this.jumps++;
             this.onGround = false;
         }
     }
+    update(dt) {
+        this.vy += GRAVITY * dt;
+        this.y  += this.vy * dt;
 
-    update() {
-        this.dy += GRAVITY;
-        this.y += this.dy;
-
-        if (this.y > GROUND_Y) {
+        const groundTop = GROUND_Y - this.h;
+        if (this.y >= groundTop) {
             if (!this.onGround) {
-                // Landing Particles
-                createParticles(this.x + this.width / 2, GROUND_Y + this.height - 10, '#00f3ff', 8);
+                spawnParticles(this.x + this.w / 2, GROUND_Y, '#00f3ff', 8);
             }
-            this.y = GROUND_Y;
-            this.dy = 0;
-            this.jumpCount = 0;
+            this.y        = groundTop;
+            this.vy       = 0;
+            this.jumps    = 0;
             this.onGround = true;
         }
-
-        this.hitbox.x = this.x + 15;
-        this.hitbox.y = this.y + 15;
     }
-
+    get hitbox() {
+        const margin = 14;
+        return { x: this.x + margin, y: this.y + margin, w: this.w - margin * 2, h: this.h - margin * 2 };
+    }
     draw() {
-        ctx.drawImage(assets.crab, this.x, this.y, this.width, this.height);
+        ctx.drawImage(assets.crab, this.x, this.y, this.w, this.h);
     }
 }
 
-// Obstacle Class
-class Obstacle {
-    constructor() {
-        this.width = 80;
-        this.height = 80;
-        this.x = canvas.width;
-        this.y = GROUND_Y + 20;
-        this.speed = OBSTACLE_SPEED;
-        this.hitbox = { x: 0, y: 0, w: 60, h: 60 };
-        this.passed = false;
-    }
-
-    update() {
-        this.x -= this.speed;
-        this.hitbox.x = this.x + 10;
-        this.hitbox.y = this.y + 10;
-    }
-
-    draw() {
-        ctx.drawImage(assets.rock, this.x, this.y, this.width, this.height);
-    }
+// ─── COLLISION ───────────────────────────────────────────────────────────────
+function boxCollide(a, b) {
+    return a.x < b.x + b.w &&
+           a.x + a.w > b.x &&
+           a.y < b.y + b.h &&
+           a.y + a.h > b.y;
 }
 
-function createParticles(x, y, color, count) {
-    for (let i = 0; i < count; i++) {
-        particles.push(new Particle(x, y, color));
-    }
+// ─── GAME STATE ──────────────────────────────────────────────────────────────
+let state           = 'LOADING'; // LOADING | INTRO | PLAYING | GAMEOVER
+let score           = 0;
+let rafId           = null;
+let gameOverTimer   = null;
+let spawnTimer      = 0;
+let screenFlash     = 0;
+let bgLayers        = [];
+let player          = null;
+let lastTime        = 0;
+
+// ─── UI REFERENCES ───────────────────────────────────────────────────────────
+const introScreen   = document.getElementById('intro-screen');
+const gameOverScreen= document.getElementById('game-over-screen');
+const hud           = document.getElementById('hud');
+const scoreEl       = document.getElementById('score');
+const finalScoreEl  = document.getElementById('final-score');
+const startBtn      = document.getElementById('start-btn');
+const restartBtn    = document.getElementById('restart-btn');
+
+function showScreen(id) {
+    [introScreen, gameOverScreen].forEach(s => s.classList.add('hidden'));
+    hud.classList.add('hidden');
+    if (id === 'intro')    { introScreen.classList.remove('hidden'); }
+    if (id === 'gameover') { gameOverScreen.classList.remove('hidden'); }
+    if (id === 'hud')      { hud.classList.remove('hidden'); }
 }
 
-const player = new Player();
+// ─── INIT GAME ───────────────────────────────────────────────────────────────
+function startGame() {
+    if (gameOverTimer !== null) { clearTimeout(gameOverTimer); gameOverTimer = null; }
 
-// UI Elements
-const introScreen = document.getElementById('intro-screen');
-const gameOverScreen = document.getElementById('game-over-screen');
-const hud = document.getElementById('hud');
-const scoreEl = document.getElementById('score');
-const finalScoreEl = document.getElementById('final-score');
-const startBtn = document.getElementById('start-btn');
-const restartBtn = document.getElementById('restart-btn');
-
-// Start Game
-function init() {
-    gameState = 'PLAYING';
-    score = 0;
-    scoreEl.textContent = '0';
-    obstacles = [];
-    particles = [];
-    lastSpawnTime = 0;
+    score       = 0;
     screenFlash = 0;
+    spawnTimer  = SPAWN_MIN + Math.random() * SPAWN_RANGE;
+    player.reset();
+
+    obstaclePool.forEach(o => o.active = false);
+    particlePool.forEach(p => p.active = false);
+    bgLayers.forEach(l => l.scrollX = 0);
+
+    scoreEl.textContent = '0';
+    showScreen('hud');
+    state = 'PLAYING';
     
-    introScreen.classList.add('hidden');
-    gameOverScreen.classList.add('hidden');
-    hud.classList.remove('hidden');
-    
-    player.y = GROUND_Y;
-    player.dy = 0;
-    player.jumpCount = 0;
-    player.onGround = true;
-    
-    gameLoop(0);
+    // Reset timer to prevent jump on first frame
+    lastTime = performance.now();
 }
 
-function checkCollision(p, o) {
-    return p.hitbox.x < o.hitbox.x + o.hitbox.w &&
-           p.hitbox.x + p.hitbox.w > o.hitbox.x &&
-           p.hitbox.y < o.hitbox.y + o.hitbox.h &&
-           p.hitbox.y + p.hitbox.h > o.hitbox.y;
-}
-
-function gameOver() {
-    gameState = 'GAMEOVER';
+function triggerGameOver() {
+    state = 'GAMEOVER';
     screenFlash = 1;
-    createParticles(player.x + 50, player.y + 50, '#ff00ff', 20);
-    
-    setTimeout(() => {
-        gameOverScreen.classList.remove('hidden');
-        finalScoreEl.textContent = Math.floor(score);
-    }, 500);
+    spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#ff00ff', 24);
+
+    finalScoreEl.textContent = Math.floor(score);
+    gameOverTimer = setTimeout(() => {
+        gameOverTimer = null;
+        showScreen('gameover');
+    }, 600);
 }
 
-// Game Loop
-function gameLoop(timestamp) {
-    if (gameState !== 'PLAYING') {
-        if (gameState === 'GAMEOVER') {
-             // Continue drawing for a bit to show collision effect
-             draw();
-             if (screenFlash > 0) screenFlash -= 0.05;
-             requestAnimationFrame(gameLoop);
-        }
+// ─── MAIN LOOP ───────────────────────────────────────────────────────────────
+function loop(ts) {
+    rafId = requestAnimationFrame(loop);
+
+    if (lastTime === 0) lastTime = ts;
+    let dt = (ts - lastTime) / 1000;
+    lastTime = ts;
+
+    // Cap dt at 100ms to prevent glitches when switching tabs
+    if (dt > 0.1) dt = 0.1;
+
+    if (state === 'INTRO') {
+        bgLayers.forEach(l => l.update(dt));
+        drawGame();
         return;
     }
+
+    if (state === 'PLAYING') {
+        updateGame(dt);
+    }
     
-    update(timestamp);
-    draw();
-    
-    animationId = requestAnimationFrame(gameLoop);
+    if (state === 'PLAYING' || state === 'GAMEOVER') {
+        drawGame();
+        if (screenFlash > 0) screenFlash = Math.max(0, screenFlash - 2.4 * dt);
+    }
+
+    if (state === 'GAMEOVER' && screenFlash <= 0 && !particlePool.some(p => p.active)) {
+        // We can optionally pause the animation loop here if we want completely static game over
+    }
 }
 
-function update(timestamp) {
-    // Background Layers
-    backgroundLayers.forEach(layer => layer.update());
+function updateGame(dt) {
+    bgLayers.forEach(l => l.update(dt));
 
-    // Spawning
-    if (timestamp - lastSpawnTime > SPAWN_INTERVAL + Math.random() * 1000) {
-        obstacles.push(new Obstacle());
-        lastSpawnTime = timestamp;
+    // Obstacle Spawning
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+        const obs = obstaclePool.find(o => !o.active);
+        if (obs) obs.spawn();
+        spawnTimer = SPAWN_MIN + Math.random() * SPAWN_RANGE;
     }
 
     // Obstacles
-    for (let i = obstacles.length - 1; i >= 0; i--) {
-        const obs = obstacles[i];
-        obs.update();
+    for (const obs of obstaclePool) {
+        if (!obs.active) continue;
+        obs.update(dt);
 
-        if (checkCollision(player, obs)) {
-            gameOver();
+        if (boxCollide(player.hitbox, obs.hitbox)) {
+            triggerGameOver();
             return;
         }
 
-        if (!obs.passed && obs.x + obs.width < player.x) {
-            score += 10;
+        if (!obs.passed && obs.x + obs.w < player.x) {
             obs.passed = true;
-            scoreEl.textContent = Math.floor(score);
-        }
-
-        if (obs.x + obs.width < 0) {
-            obstacles.splice(i, 1);
+            score += 10;
+            scoreEl.textContent = score;
         }
     }
 
     // Particles
-    for (let i = particles.length - 1; i >= 0; i--) {
-        particles[i].update();
-        if (particles[i].alpha <= 0) {
-            particles.splice(i, 1);
-        }
-    }
+    particlePool.forEach(p => p.update(dt));
 
     // Player
-    player.update();
+    player.update(dt);
 }
 
-function draw() {
+function drawGame() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    backgroundLayers.forEach(layer => layer.draw());
+    bgLayers.forEach(l => l.draw());
+    obstaclePool.forEach(o => o.draw());
+    particlePool.forEach(p => p.draw());
+    if (player) player.draw();
 
-    obstacles.forEach(obs => obs.draw());
-
-    particles.forEach(p => p.draw());
-
-    player.draw();
-
-    // Screen Flash Effect
     if (screenFlash > 0) {
-        ctx.fillStyle = `rgba(255, 255, 255, ${screenFlash})`;
+        ctx.fillStyle = `rgba(255,255,255,${screenFlash.toFixed(2)})`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 }
 
-// Event Listeners
-startBtn.addEventListener('click', init);
-restartBtn.addEventListener('click', init);
-
-window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-        if (gameState === 'INTRO') {
-            init();
-        } else if (gameState === 'GAMEOVER') {
-            init();
-        } else if (gameState === 'PLAYING') {
-            player.jump();
-        }
+// ─── INPUT ───────────────────────────────────────────────────────────────────
+window.addEventListener('keydown', e => {
+    if (e.code !== 'Space' && e.code !== 'ArrowUp') return;
+    e.preventDefault();
+    if (state === 'INTRO' || state === 'GAMEOVER') {
+        startGame();
+    } else if (state === 'PLAYING') {
+        player.jump();
     }
 });
 
-// Initial draw to show background and crab on start screen
-assets.bg.onload = () => {
-    ctx.drawImage(assets.bg, 0, 0, canvas.width, canvas.height);
-    assets.crab.onload = () => {
-        player.draw();
-    };
-};
+startBtn.addEventListener('click',   startGame);
+restartBtn.addEventListener('click', startGame);
+
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (state === 'INTRO' || state === 'GAMEOVER') {
+        startGame();
+    } else if (state === 'PLAYING') {
+        player.jump();
+    }
+}, { passive: false });
+
+// ─── BOOT ────────────────────────────────────────────────────────────────────
+loadAssets(() => {
+    bgLayers = [
+        new ParallaxLayer(assets.bg,    0.15, 0,   canvas.height),
+        new ParallaxLayer(assets.floor, 0.75, 300, canvas.height - 300),
+    ];
+
+    player = new Player();
+    state = 'INTRO';
+    showScreen('intro');
+    
+    // Start animation loop immediately for the animated intro screen
+    lastTime = performance.now();
+    rafId = requestAnimationFrame(loop);
+});

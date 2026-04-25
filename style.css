@@ -1,142 +1,142 @@
 :root {
-    --neon-blue: #00f3ff;
-    --neon-pink: #ff00ff;
+    --neon-blue:   #00f3ff;
+    --neon-pink:   #ff00ff;
     --neon-purple: #9d00ff;
-    --bg-dark: #0a0a1a;
-    --text-white: #ffffff;
+    --bg-dark:     #0a0a1a;
+    --text-white:  #ffffff;
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-body {
-    font-family: 'Outfit', sans-serif;
-    background-color: var(--bg-dark);
-    color: var(--text-white);
+html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg-dark);
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
-    overflow: hidden;
+    font-family: 'Outfit', sans-serif;
+    color: var(--text-white);
 }
 
+/* ── Game container – responsive 16:9 ─────────────────────────────────────── */
 #game-container {
     position: relative;
-    width: 800px;
-    height: 450px;
+    width: 100%;
+    max-width: 800px;
+    aspect-ratio: 16 / 9;
+    height: auto;
     border: 3px solid var(--neon-blue);
-    box-shadow: 0 0 20px rgba(0, 243, 255, 0.3);
     border-radius: 12px;
+    box-shadow: 0 0 30px rgba(0,243,255,0.35),
+                0 0 60px rgba(0,243,255,0.12);
+    overflow: hidden; /* clip canvas + overlays cleanly */
     background: #000;
 }
 
-canvas {
+/* ── Canvas fills container exactly ─────────────────────────────────────── */
+#gameCanvas {
     display: block;
-    width: 100%;
+    width:  100%;
     height: 100%;
     border-radius: 10px;
 }
 
-/* Overlays */
+/* ── UI Overlays ────────────────────────────────────────────────────────── */
 .overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(10, 10, 26, 0.85);
+    inset: 0;                          /* top/right/bottom/left = 0 */
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 10;
-    backdrop-filter: blur(5px);
+    background: rgba(10,10,26,0.82);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 20;
     border-radius: 10px;
-    transition: opacity 0.3s ease;
 }
 
 .content {
     text-align: center;
-    animation: fadeIn 0.5s ease-out;
+    animation: fadeUp 0.45s ease-out both;
 }
 
+/* ── Typography ─────────────────────────────────────────────────────────── */
 h1 {
     font-size: 4rem;
     font-weight: 700;
-    letter-spacing: 5px;
-    margin-bottom: 10px;
+    letter-spacing: 6px;
+    margin-bottom: 12px;
     background: linear-gradient(to right, var(--neon-blue), var(--neon-pink));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 10px rgba(255, 0, 255, 0.5);
+    background-clip: text;
 }
 
 .game-over-text {
-    color: #ff3333;
     background: none;
-    -webkit-text-fill-color: #ff3333;
+    -webkit-text-fill-color: #ff4444;
+    color: #ff4444;
+    text-shadow: 0 0 20px rgba(255,68,68,0.7);
 }
 
-p {
-    font-size: 1.2rem;
-    margin-bottom: 30px;
-    opacity: 0.8;
-}
+p { font-size: 1.15rem; margin-bottom: 28px; opacity: 0.82; }
 
-/* Buttons */
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
 .neon-btn {
-    padding: 15px 40px;
-    font-size: 1.5rem;
+    padding: 14px 42px;
+    font-size: 1.4rem;
     font-weight: 700;
+    font-family: 'Outfit', sans-serif;
     background: transparent;
     color: var(--neon-blue);
     border: 2px solid var(--neon-blue);
     border-radius: 50px;
     cursor: pointer;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
     letter-spacing: 2px;
-    box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+    text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(0,243,255,0.25);
+    transition: background 0.25s, color 0.25s, box-shadow 0.25s, transform 0.15s;
 }
-
 .neon-btn:hover {
     background: var(--neon-blue);
     color: var(--bg-dark);
-    box-shadow: 0 0 30px rgba(0, 243, 255, 0.8);
-    transform: scale(1.05);
+    box-shadow: 0 0 35px rgba(0,243,255,0.9);
+    transform: scale(1.06);
 }
+.neon-btn:active { transform: scale(0.98); }
 
 .controls-hint {
-    margin-top: 30px;
-    font-size: 0.9rem;
-    opacity: 0.6;
+    margin-top: 28px;
+    font-size: 0.88rem;
+    opacity: 0.55;
+    letter-spacing: 1px;
 }
-
 .controls-hint span {
-    padding: 2px 8px;
-    border: 1px solid var(--text-white);
+    padding: 2px 9px;
+    border: 1px solid rgba(255,255,255,0.6);
     border-radius: 4px;
-    font-weight: bold;
+    font-weight: 700;
 }
 
-/* HUD */
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
 #hud {
     position: absolute;
-    top: 20px;
-    right: 20px;
+    top: 18px;
+    right: 22px;
     font-size: 1.5rem;
     font-weight: 700;
-    text-shadow: 0 0 10px var(--neon-blue);
-    z-index: 5;
+    text-shadow: 0 0 12px var(--neon-blue);
+    z-index: 15;
+    pointer-events: none;
+    user-select: none;
 }
 
-.hidden {
-    display: none !important;
-}
+/* ── Visibility helper ───────────────────────────────────────────────────── */
+.hidden { display: none !important; }
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(24px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
